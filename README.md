@@ -169,7 +169,6 @@ Both fixes live on the Arduino side. Nothing in the QNAP firmware is modified.
 | `UPS.ino` | The sketch. Simulated battery, mains detection, HID reporting. |
 | `boards.local.txt` | Board definition "UPS NUT". Install it into the Arduino AVR core. |
 | `gravar.bat` | Flashes the board by calling avrdude directly, retrying for 30 seconds. |
-| `UPS.ino.bak` | The original example from the library, before any of this work. |
 | `projeto-nobreak-qnap-handoff.md` | Working log in Portuguese. Every measurement and every dead end. |
 
 ## Reproduction
@@ -803,7 +802,6 @@ As duas correções ficam do lado do Arduino. Nada no firmware do QNAP é altera
 | `UPS.ino` | O sketch. Bateria simulada, detecção de rede, relatórios HID. |
 | `boards.local.txt` | Definição da board "UPS NUT". Instalar no core AVR do Arduino. |
 | `gravar.bat` | Grava a placa chamando o avrdude direto, tentando por 30 segundos. |
-| `UPS.ino.bak` | O exemplo original da biblioteca, antes de todo este trabalho. |
 | `projeto-nobreak-qnap-handoff.md` | Diário de bordo. Cada medição e cada beco sem saída. |
 
 ## Reprodução
