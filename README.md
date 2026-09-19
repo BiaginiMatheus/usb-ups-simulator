@@ -25,6 +25,8 @@ The simulated battery is a software countdown, not a measurement. The Arduino ha
 no sensor on the real battery. Read the calibration section before trusting the
 numbers.
 
+-----
+
 Um Arduino Pro Micro que finge ser um nobreak USB para que um QNAP TS-419P II
 consiga se desligar de forma limpa quando a energia cai.
 
