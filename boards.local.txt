@@ -1,0 +1,65 @@
+# ---------------------------------------------------------------------------
+# Board "UPS NUT" — projeto nobreak -> QNAP TS-419P II
+#
+# Igual ao Arduino Leonardo, com tres diferencas, todas ditadas pelo que o
+# NUT 2.7.4 do QTS 4.3.3 exige (medido em 18/09/2026):
+#
+#  1. -DCDC_DISABLED  -> CDC_INTERFACE_COUNT vira 0 e o PluggableUSB atribui a
+#     INTERFACE 0 ao HID. O usbhid-ups 2.7.4 reivindica so a interface 0; com o
+#     CDC ligado o HID ficava na 2 e o driver levava "Broken pipe".
+#
+#  2. VID 0x0463 (MGE) -> o 2.7.4 nao tem o subdriver Arduino (entrou so no
+#     2.8.x, PR #1044), mas tem o "MGE HID 1.39". E o /etc/config/ups/upsdrv.map
+#     do QNAP mapeia "0x463,,usbhid-ups" sem restringir o product ID, entao o
+#     QTS para de marcar o dispositivo como NOT_UPS.
+#
+#  3. Upload: o 1200bps touch e o wait_for_upload_port ficam LIGADOS.
+#     - Primeira gravacao: a placa ainda roda o sketch antigo, com CDC, entao o
+#       auto-reset funciona e o upload e igual ao de um Leonardo normal.
+#     - Gravacoes seguintes: a placa nao expoe mais porta serial. Duplo toque no
+#       RST para entrar no bootloader (2341:0036, o Caterina nao muda), escolher
+#       essa porta, e gravar. O touch na porta do bootloader e inofensivo: a
+#       logica do 1200bps mora no CDC do sketch, nao no bootloader.
+#
+# Se o PID 0x0001 nao for aceito pelo mge-hid, tentar 0xffff.
+# ---------------------------------------------------------------------------
+
+upsnut.name=UPS NUT (32u4, no CDC, MGE VID)
+
+upsnut.vid.0=0x2341
+upsnut.pid.0=0x0036
+upsnut.vid.1=0x0463
+upsnut.pid.1=0x0001
+upsnut.upload_port.0.vid=0x2341
+upsnut.upload_port.0.pid=0x0036
+upsnut.upload_port.1.board=upsnut
+
+upsnut.upload.tool=avrdude
+upsnut.upload.tool.default=avrdude
+upsnut.upload.protocol=avr109
+upsnut.upload.maximum_size=28672
+upsnut.upload.maximum_data_size=2560
+upsnut.upload.speed=57600
+upsnut.upload.disable_flushing=true
+upsnut.upload.use_1200bps_touch=true
+upsnut.upload.wait_for_upload_port=true
+
+upsnut.bootloader.tool=avrdude
+upsnut.bootloader.tool.default=avrdude
+upsnut.bootloader.low_fuses=0xff
+upsnut.bootloader.high_fuses=0xd8
+upsnut.bootloader.extended_fuses=0xcb
+upsnut.bootloader.file=caterina/Caterina-Leonardo.hex
+upsnut.bootloader.unlock_bits=0x3F
+upsnut.bootloader.lock_bits=0x2F
+
+upsnut.build.mcu=atmega32u4
+upsnut.build.f_cpu=16000000L
+upsnut.build.vid=0x0463
+upsnut.build.pid=0x0001
+upsnut.build.usb_manufacturer="MGE UPS SYSTEMS"
+upsnut.build.usb_product="Evolution 650"
+upsnut.build.board=AVR_LEONARDO
+upsnut.build.core=arduino
+upsnut.build.variant=leonardo
+upsnut.build.extra_flags=-DCDC_DISABLED {build.usb_flags}
