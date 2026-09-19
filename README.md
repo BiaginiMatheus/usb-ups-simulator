@@ -17,12 +17,38 @@ machine running NUT, Windows, macOS or a different NAS.
 Two of the choices in this project exist only because QTS 4.3.3 ships NUT 2.7.4.
 On a host running NUT 2.8.x or newer you can keep the real Arduino vendor ID and
 leave CDC enabled, because that release added both the Arduino subdriver and
-support for a HID UPS on an interface above 0. Read the next section before
-copying the board definition onto a modern system.
+support for a HID UPS on an interface above 0. Read
+[Why the Arduino has to lie about its identity](#why-the-arduino-has-to-lie-about-its-identity)
+before copying the board definition onto a modern system.
 
 The simulated battery is a software countdown, not a measurement. The Arduino has
 no sensor on the real battery. Read the calibration section before trusting the
 numbers.
+
+Um Arduino Pro Micro que finge ser um nobreak USB para que um QNAP TS-419P II
+consiga se desligar de forma limpa quando a energia cai.
+
+O nobreak aqui é um Siera UPS500, um 500VA line-interactive barato, sem porta de
+dados nenhuma. O NAS, portanto, não tem como saber que a energia acabou. Este
+projeto preenche essa lacuna. Um circuito detector de rede observa uma tomada, um
+ATmega32U4 se apresenta ao NAS como um HID Power Device, e o NUT que já roda
+dentro do QTS lê tudo como se fosse um nobreak inteligente qualquer.
+
+O host aqui é um QNAP TS-419P II, que foi onde isto foi construído e testado.
+Nada no firmware é específico dele. O Arduino se apresenta como um USB HID Power
+Device padrão, então qualquer host que saiba ler um vai enxergá-lo, seja uma
+máquina Linux rodando NUT, Windows, macOS ou outro NAS.
+
+Duas das escolhas deste projeto existem só porque o QTS 4.3.3 traz o NUT 2.7.4.
+Num host com NUT 2.8.x ou mais novo dá para manter o vendor ID real do Arduino e
+deixar o CDC ligado, porque essa versão trouxe tanto o subdriver Arduino quanto o
+suporte a UPS HID em interface acima de 0. Leia
+[Por que o Arduino precisa mentir sobre a própria identidade](#por-que-o-arduino-precisa-mentir-sobre-a-própria-identidade)
+antes de copiar a definição de board para um sistema moderno.
+
+A bateria simulada é uma contagem regressiva por software, não uma medição. O
+Arduino não tem sensor nenhum na bateria real. Leia a seção de calibração antes de
+confiar nos números.
 
 ## Contents
 
@@ -671,29 +697,7 @@ led to it, kept because they cost time to find.
 
 # Português
 
-Um Arduino Pro Micro que finge ser um nobreak USB para que um QNAP TS-419P II
-consiga se desligar de forma limpa quando a energia cai.
-
-O nobreak aqui é um Siera UPS500, um 500VA line-interactive barato, sem porta de
-dados nenhuma. O NAS, portanto, não tem como saber que a energia acabou. Este
-projeto preenche essa lacuna. Um circuito detector de rede observa uma tomada, um
-ATmega32U4 se apresenta ao NAS como um HID Power Device, e o NUT que já roda
-dentro do QTS lê tudo como se fosse um nobreak inteligente qualquer.
-
-O host aqui é um QNAP TS-419P II, que foi onde isto foi construído e testado.
-Nada no firmware é específico dele. O Arduino se apresenta como um USB HID Power
-Device padrão, então qualquer host que saiba ler um vai enxergá-lo, seja uma
-máquina Linux rodando NUT, Windows, macOS ou outro NAS.
-
-Duas das escolhas deste projeto existem só porque o QTS 4.3.3 traz o NUT 2.7.4.
-Num host com NUT 2.8.x ou mais novo dá para manter o vendor ID real do Arduino e
-deixar o CDC ligado, porque essa versão trouxe tanto o subdriver Arduino quanto o
-suporte a UPS HID em interface acima de 0. Leia a próxima seção antes de copiar a
-definição de board para um sistema moderno.
-
-A bateria simulada é uma contagem regressiva por software, não uma medição. O
-Arduino não tem sensor nenhum na bateria real. Leia a seção de calibração antes de
-confiar nos números.
+A introdução está no topo do arquivo, logo abaixo da versão em inglês.
 
 ## Cadeia do sinal
 
