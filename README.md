@@ -24,6 +24,44 @@ The simulated battery is a software countdown, not a measurement. The Arduino ha
 no sensor on the real battery. Read the calibration section before trusting the
 numbers.
 
+## Contents
+
+English
+
+- [Signal chain](#signal-chain)
+- [Hardware](#hardware)
+- [Why the Arduino has to lie about its identity](#why-the-arduino-has-to-lie-about-its-identity)
+- [Repository contents](#repository-contents)
+- [Reproduction](#reproduction)
+- [Wiring](#wiring)
+- [Calibration](#calibration)
+- [Shutdown policy](#shutdown-policy)
+- [Known limitations](#known-limitations)
+- [Troubleshooting](#troubleshooting)
+- [Diagnostic commands](#diagnostic-commands)
+- [If the MGE identity is rejected](#if-the-mge-identity-is-rejected)
+- [Traps already paid for](#traps-already-paid-for)
+- [Still to do](#still-to-do)
+- [References](#references)
+
+Português
+
+- [Cadeia do sinal](#cadeia-do-sinal)
+- [Hardware](#hardware-1)
+- [Por que o Arduino precisa mentir sobre a própria identidade](#por-que-o-arduino-precisa-mentir-sobre-a-própria-identidade)
+- [Conteúdo do repositório](#conteúdo-do-repositório)
+- [Reprodução](#reprodução)
+- [Ligação](#ligação)
+- [Calibração](#calibração)
+- [Política de desligamento](#política-de-desligamento)
+- [Limitações conhecidas](#limitações-conhecidas)
+- [Solução de problemas](#solução-de-problemas)
+- [Comandos de diagnóstico](#comandos-de-diagnóstico)
+- [Se a identidade MGE for recusada](#se-a-identidade-mge-for-recusada)
+- [Armadilhas já pagas](#armadilhas-já-pagas)
+- [Ainda por fazer](#ainda-por-fazer)
+- [Referências](#referências)
+
 ## Signal chain
 
 1. A mains-presence detector holds Arduino pin 4 at ground while mains power is
@@ -433,6 +471,128 @@ The reported capacity is simulated. It tracks elapsed time since the outage, not
 the real battery. An old or damaged battery will die earlier than the timer
 expects, which is why the 60% margin exists.
 
+## Troubleshooting
+
+Symptoms are listed roughly in the order you will meet them.
+
+**The board does not appear in the IDE board list.** The IDE reads
+`boards.local.txt` only at startup, so restart it. If it still does not appear,
+your IDE version may not accept a whole new board defined in that file. Override
+the Leonardo entry instead, by putting `leonardo.build.vid`, `leonardo.build.pid`
+and `leonardo.build.extra_flags` in `boards.local.txt` with the same values.
+
+**The compiler reports "redefinition of" for every symbol.** There is more than
+one `.ino` in the sketch folder. The IDE concatenates all of them before
+compiling. Delete or rename the extra one. Files ending in `.bak` are ignored,
+files ending in `.ino` are not.
+
+**The compiler complains about `Serial_`.** Either the library patch from step 2
+is missing, or `DEBUG_SERIAL` is not 0. The `Serial_` type does not exist in a
+build without CDC.
+
+**The upload runs forever, or avrdude reports `butterfly_recv(pgm, &c, 1)
+failed`.** avrdude is talking to the port of the running sketch instead of the
+bootloader port. Use `gravar.bat` with the bootloader port and short RST to GND
+twice while it retries.
+
+**Windows still shows a COM port for the board.** `-DCDC_DISABLED` did not reach
+the compiler. Check that the UPS NUT board is selected and not Leonardo, and that
+`build.extra_flags` in `boards.local.txt` includes the flag.
+
+**Windows shows the wrong battery percentage.** Ignore it. Its HID battery stack
+mishandles a laptop that has its own battery plus a second HID battery. Use the
+serial output on the bench and `upsc` on the NAS.
+
+**`/etc/init.d/ups.sh restart` prints `UPS diseble`.** UPS support is switched off
+in the QNAP interface. Enable it under Control Panel, External Device, UPS, and
+apply.
+
+**`upsc qnapups` returns `Error: Connection failure: Connection refused`.** `upsd`
+is not running, which normally means no driver started. Check with
+`ps | grep -i ups`. If UPS support is already enabled in the interface, unplug and
+replug the Arduino, because QTS evaluates a USB device only at hotplug.
+
+**A new `NOT_UPS` line appears in `/etc/config/ups/upsdrv.map`.** QTS decided at
+hotplug that the device is not a UPS, and will never start a driver for it. The
+vendor ID is the reason. Confirm the board really enumerated as 0x0463.
+
+**The driver prints `Device does not match - skipping`.** No subdriver claims that
+vendor ID. Either the new vendor ID did not take effect, or the QTS binary has no
+subdriver for the one you chose.
+
+**The driver prints `Unable to get HID descriptor (Broken pipe)`.** The HID is not
+on interface 0, so CDC is still enabled in the build. This is the symptom that
+`-DCDC_DISABLED` exists to fix.
+
+**The driver cannot claim the device.** Another driver already has it. Stop the
+service, or press Ctrl+C on the copy you started by hand. Two drivers cannot claim
+the same USB device.
+
+**`battery.charge.low` is not 10.** The host overwrote the HID variable. The
+sketch rewrites it every cycle, so a single wrong reading between the write and
+the report is expected and harmless. A value that stays wrong means the sketch is
+an older build.
+
+## Diagnostic commands
+
+Run these on the NAS over SSH. Note that QTS uses BusyBox, whose `grep` has no
+`-a` flag, and that there is no `lsusb`.
+
+```sh
+# QTS version and build. There is no /etc/version on this firmware.
+getcfg System Version -f /etc/config/uLinux.conf
+getcfg System 'Build Number' -f /etc/config/uLinux.conf
+
+# NUT version
+/usr/local/ups/sbin/upsd -V
+
+# Which subdrivers the shipped binary actually contains
+strings /usr/local/ups/bin/usbhid-ups | grep "HID [0-9]"
+
+# Whether it has the Arduino subdriver at all
+strings /usr/local/ups/bin/usbhid-ups | grep -i arduino
+
+# USB devices, since lsusb is absent
+for d in /sys/bus/usb/devices/*/; do [ -f "$d/idVendor" ] && echo "$(cat $d/idVendor):$(cat $d/idProduct) $(cat $d/product 2>/dev/null)"; done
+
+# What QTS decided about each device at hotplug
+tail -5 /etc/config/ups/upsdrv.map
+
+# Kernel view of the HID device, including which interface it landed on
+dmesg | tail -30
+
+# Driver by hand, full debug
+/usr/local/ups/bin/usbhid-ups -DDD -u admin -a qnapups -x vendorid=0463
+```
+
+Adding `-x explore` to the last command makes the driver accept a device that no
+subdriver claims, and dump the HID tree. It produces no usable UPS state, but it
+answers whether the descriptor can be read at all, which is how the interface
+problem was found.
+
+The NUT configuration on QTS lives in `/etc/config/ups/`, which survives reboots.
+The UPS name is fixed. It has to be `qnapups`.
+
+## If the MGE identity is rejected
+
+If `mge-hid` ever refuses the device, work down this list.
+
+Change the product ID to 0xffff, which the MGE device table also lists.
+
+Change the vendor to another one the shipped binary supports and the map file
+routes to `usbhid-ups`. The candidates are APC at 0x051d, CyberPower at 0x0764 and
+TrippLite at 0x09ae. Each has its own quirks. APC is the next most likely to work.
+
+Force the driver by hand in `/etc/config/ups/ups.conf`, with explicit `vendorid`
+and `productid`, and `explore` if needed. That directory is persistent, but the
+QNAP interface can overwrite the file when you change UPS settings.
+
+Run a modern NUT on a separate machine. Any Linux box with NUT 2.8.x or newer has
+the Arduino subdriver and the interface fix, so it can talk to an unmodified
+Arduino and act as a NUT server, with the QNAP joining as a network client. The
+cost is that the extra machine also has to be on the UPS, which is why this
+project avoided it.
+
 ## Traps already paid for
 
 The host writes to the HID feature reports. `HID_SET_REPORT` copies straight into
@@ -466,6 +626,13 @@ whose Arduino Nano was grabbed by the QNAP `ups_yec` driver.
 
 Uploading to a 32u4 after flashing a sketch that takes over USB makes the COM port
 disappear or change. Double short RST to GND for an 8 second bootloader window.
+
+Pin 10 is not the mains pin. `COMMLOSTPIN` signals that a HID report failed to
+reach the host. The mains input is pin 4.
+
+Library examples are read only in the Arduino IDE 2.x. Editing one makes the IDE
+save a copy, and it is easy to end up flashing the untouched original instead of
+your edit.
 
 ## Still to do
 
@@ -941,6 +1108,130 @@ A carga reportada é simulada. Ela acompanha o tempo decorrido desde a queda, n�
 bateria real. Uma bateria velha ou danificada morre antes do que o timer espera, e
 é para isso que existe a margem de 60%.
 
+## Solução de problemas
+
+Os sintomas estão mais ou menos na ordem em que você vai encontrá-los.
+
+**A board não aparece na lista da IDE.** A IDE lê o `boards.local.txt` só na
+inicialização, então reinicie. Se mesmo assim não aparecer, a sua versão da IDE
+pode não aceitar uma board nova definida nesse arquivo. Sobrescreva a entrada do
+Leonardo, pondo `leonardo.build.vid`, `leonardo.build.pid` e
+`leonardo.build.extra_flags` no `boards.local.txt` com os mesmos valores.
+
+**O compilador acusa "redefinition of" em todos os símbolos.** Há mais de um
+`.ino` na pasta do sketch. A IDE concatena todos antes de compilar. Apague ou
+renomeie o extra. Arquivos terminados em `.bak` são ignorados, os terminados em
+`.ino` não.
+
+**O compilador reclama do `Serial_`.** Ou falta o patch da biblioteca do passo 2,
+ou o `DEBUG_SERIAL` não está em 0. O tipo `Serial_` não existe numa compilação
+sem CDC.
+
+**O upload roda para sempre, ou o avrdude acusa `butterfly_recv(pgm, &c, 1)
+failed`.** O avrdude está falando com a porta do sketch em execução, não com a do
+bootloader. Use o `gravar.bat` com a porta do bootloader e curto-circuite o RST no
+GND duas vezes enquanto ele tenta.
+
+**O Windows ainda mostra uma porta COM para a placa.** O `-DCDC_DISABLED` não
+chegou ao compilador. Confira se a board selecionada é a UPS NUT e não a Leonardo,
+e se o `build.extra_flags` do `boards.local.txt` traz a flag.
+
+**O Windows mostra a porcentagem de bateria errada.** Ignore. A stack de bateria
+HID dele lida mal com um notebook que tem bateria própria mais uma segunda bateria
+HID. Use a saída serial na bancada e o `upsc` no NAS.
+
+**O `/etc/init.d/ups.sh restart` imprime `UPS diseble`.** O suporte a UPS está
+desligado na interface da QNAP. Habilite em Painel de Controle, Dispositivo
+externo, UPS, e aplique.
+
+**O `upsc qnapups` devolve `Error: Connection failure: Connection refused`.** O
+`upsd` não está rodando, o que normalmente significa que nenhum driver subiu.
+Confira com `ps | grep -i ups`. Se o suporte a UPS já estiver habilitado na
+interface, desplugue e replugue o Arduino, porque o QTS avalia um dispositivo USB
+só no hotplug.
+
+**Uma linha nova de `NOT_UPS` aparece no `/etc/config/ups/upsdrv.map`.** O QTS
+decidiu, no hotplug, que o dispositivo não é um nobreak, e nunca vai subir driver
+para ele. O motivo é o vendor ID. Confirme que a placa enumerou mesmo como 0x0463.
+
+**O driver imprime `Device does not match - skipping`.** Nenhum subdriver
+reivindica aquele vendor ID. Ou o vendor ID novo não fez efeito, ou o binário do
+QTS não tem subdriver para o que você escolheu.
+
+**O driver imprime `Unable to get HID descriptor (Broken pipe)`.** O HID não está
+na interface 0, ou seja, o CDC continua ligado na compilação. É exatamente o
+sintoma que o `-DCDC_DISABLED` existe para resolver.
+
+**O driver não consegue reivindicar o dispositivo.** Outro driver já o tem. Pare o
+serviço, ou dê Ctrl+C na cópia que você subiu na mão. Dois drivers não podem
+reivindicar o mesmo dispositivo USB.
+
+**O `battery.charge.low` não é 10.** O host sobrescreveu a variável HID. O sketch
+a reescreve a cada ciclo, então uma leitura errada isolada entre a escrita e o
+relatório é esperada e inofensiva. Um valor que fica errado significa que o sketch
+é de uma versão antiga.
+
+## Comandos de diagnóstico
+
+Rode estes no NAS por SSH. Note que o QTS usa BusyBox, cujo `grep` não tem a flag
+`-a`, e que não existe `lsusb`.
+
+```sh
+# Versão e build do QTS. Não existe /etc/version neste firmware.
+getcfg System Version -f /etc/config/uLinux.conf
+getcfg System 'Build Number' -f /etc/config/uLinux.conf
+
+# Versão do NUT
+/usr/local/ups/sbin/upsd -V
+
+# Quais subdrivers o binário embarcado realmente tem
+strings /usr/local/ups/bin/usbhid-ups | grep "HID [0-9]"
+
+# Se ele tem o subdriver Arduino
+strings /usr/local/ups/bin/usbhid-ups | grep -i arduino
+
+# Dispositivos USB, já que não há lsusb
+for d in /sys/bus/usb/devices/*/; do [ -f "$d/idVendor" ] && echo "$(cat $d/idVendor):$(cat $d/idProduct) $(cat $d/product 2>/dev/null)"; done
+
+# O que o QTS decidiu sobre cada dispositivo no hotplug
+tail -5 /etc/config/ups/upsdrv.map
+
+# Visão do kernel sobre o HID, incluindo em qual interface ele caiu
+dmesg | tail -30
+
+# Driver na mão, debug completo
+/usr/local/ups/bin/usbhid-ups -DDD -u admin -a qnapups -x vendorid=0463
+```
+
+Acrescentar `-x explore` ao último comando faz o driver aceitar um dispositivo que
+nenhum subdriver reivindica, e despejar a árvore HID. Não produz estado de nobreak
+utilizável, mas responde se o descritor pode ser lido, que foi como o problema da
+interface apareceu.
+
+A configuração do NUT no QTS fica em `/etc/config/ups/`, que sobrevive a reboots.
+O nome do nobreak é fixo. Tem que ser `qnapups`.
+
+## Se a identidade MGE for recusada
+
+Se algum dia o `mge-hid` recusar o dispositivo, siga esta lista.
+
+Mude o product ID para 0xffff, que a tabela de dispositivos MGE também lista.
+
+Mude o vendor para outro que o binário embarcado suporte e que o arquivo de mapa
+roteie para o `usbhid-ups`. Os candidatos são APC em 0x051d, CyberPower em 0x0764
+e TrippLite em 0x09ae. Cada um tem suas manias. O APC é o mais provável de
+funcionar em seguida.
+
+Force o driver na mão em `/etc/config/ups/ups.conf`, com `vendorid` e `productid`
+explícitos, e `explore` se precisar. Esse diretório é persistente, mas a interface
+da QNAP pode sobrescrever o arquivo quando você mexe nas configurações de UPS.
+
+Rode um NUT moderno em outra máquina. Qualquer Linux com NUT 2.8.x ou mais novo
+tem o subdriver Arduino e a correção da interface, então consegue falar com um
+Arduino sem modificação nenhuma e agir como servidor NUT, com o QNAP entrando como
+cliente de rede. O custo é que a máquina extra também precisa estar no nobreak, e
+foi por isso que este projeto evitou esse caminho.
+
 ## Armadilhas já pagas
 
 O host escreve nas features HID. O `HID_SET_REPORT` copia direto para a variável
@@ -973,6 +1264,13 @@ anteriormente, cujo Arduino Nano era agarrado pelo driver `ups_yec` do QNAP.
 
 Gravar num 32u4 depois de subir um sketch que assume a USB faz a porta COM sumir
 ou mudar. Duplo curto do RST no GND dá uma janela de 8 segundos de bootloader.
+
+O pino 10 não é o pino da rede. O `COMMLOSTPIN` sinaliza que um relatório HID
+falhou ao chegar no host. A entrada de rede é o pino 4.
+
+Exemplos de biblioteca são somente leitura na Arduino IDE 2.x. Editar um faz a IDE
+salvar uma cópia, e é fácil acabar gravando o original intocado em vez da sua
+edição.
 
 ## Ainda por fazer
 
