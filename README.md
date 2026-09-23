@@ -25,8 +25,6 @@ The simulated battery is a software countdown, not a measurement. The Arduino ha
 no sensor on the real battery. Read the calibration section before trusting the
 numbers.
 
------
-
 Um Arduino Pro Micro que finge ser um nobreak USB para que um QNAP TS-419P II
 consiga se desligar de forma limpa quando a energia cai.
 
@@ -92,11 +90,12 @@ Português
 
 ## Signal chain
 
-1. A mains-presence detector holds Arduino pin 4 at ground while mains power is
-   present, and releases it when mains fails. That circuit is not designed yet.
-   The wiring section below states what it has to do.
-2. The internal pull-up takes pin 4 high as soon as the detector releases it, so a
-   broken wire or a dead component also reads as a power failure.
+1. A 5V phone charger on a mains outlet feeds the LED of a PC817 optocoupler
+   through a 330 ohm resistor. While mains power is present the phototransistor
+   conducts and holds Arduino pin 4 at ground.
+2. When mains fails the charger dies, the phototransistor opens, and R2 pulls pin
+   4 high. A broken wire or a dead component does the same, so failure reads as a
+   power failure.
 3. The Arduino runs a simulated battery. It reports capacity, runtime and status
    flags over USB HID, using the HID Power Device Class.
 4. The QNAP runs `usbhid-ups` from NUT 2.7.4. It reads the Arduino as a UPS and
@@ -119,7 +118,7 @@ alarm costs an unnecessary shutdown. An alarm that never fires costs the array.
 | NUT inside QTS | 2.7.4, binaries under `/usr/local/ups/` |
 | Microcontroller | Arduino Pro Micro clone, ATmega32U4, 5V, 16MHz |
 | UPS | Siera UPS500, 500VA, line-interactive, 220V, no USB port |
-| Mains detection | Circuit not designed yet. See the wiring section for what it has to do. |
+| Mains detection | PC817 optocoupler, 330 ohm and two 1k resistors, an LED, and a cut USB cable. See the wiring section. |
 
 The TS-419P II draws 26W in operation according to QNAP, measured with four 500GB
 drives. Larger drives push that to roughly 30 to 35W. That figure matters for
@@ -197,6 +196,7 @@ Both fixes live on the Arduino side. Nothing in the QNAP firmware is modified.
 | `UPS.ino` | The sketch. Simulated battery, mains detection, HID reporting. |
 | `boards.local.txt` | Board definition "UPS NUT". Install it into the Arduino AVR core. |
 | `gravar.bat` | Flashes the board by calling avrdude directly, retrying for 30 seconds. |
+| `circuit-diagram.png` | Schematic of the mains detection circuit. |
 | `projeto-nobreak-qnap-handoff.md` | Working log in Portuguese. Every measurement and every dead end. |
 
 ## Reproduction
@@ -414,28 +414,68 @@ for a variable that a real MGE unit would have.
 
 ## Wiring
 
-Not designed yet. The current setup uses a jumper between pin 4 and GND in place
-of a real circuit.
+![Mains detection circuit](circuit-diagram.png)
 
-Whatever goes here has to meet four requirements, because the firmware depends on
-them.
+### Bill of materials
 
-It pulls pin 4 to ground while mains power is present and releases it when mains
-fails. `AC_PRESENT_LEVEL` is `LOW` in the sketch. Invert that constant if your
-circuit works the other way round.
+| Qty | Part | Where |
+|---|---|---|
+| 1 | PC817 optocoupler | Between the two sides. It is what keeps them isolated. |
+| 1 | 330 ohm resistor | R1, in series with the PC817 LED, on the USB side |
+| 2 | 1k ohm resistors | R2 pulls pin 4 up, R3 limits the indicator LED |
+| 1 | LED | Lights only during an outage |
+| 1 | USB cable | Cut one end off and use the 5V and GND wires |
 
-It fails open. A broken wire, a dead component or an unplugged supply all have to
-read as a power failure. A false alarm costs one unnecessary shutdown. An alarm
-that never fires costs the array.
+The cut USB cable plugs into any phone charger on a **mains outlet**. Never into
+the UPS. The whole design rests on that charger dying when the power does.
+
+### How it works
+
+While mains power is present, R1 feeds about 11mA through the PC817 LED, the
+phototransistor saturates, and it pulls the pin 4 node down to roughly 0.2V. The
+Arduino reads LOW, which the sketch interprets as mains present, and the indicator
+LED stays dark because 0.2V is below its forward voltage.
+
+When mains fails the charger dies, the phototransistor opens, and the node is
+pulled up through R2. The Arduino reads HIGH and the sketch starts the countdown.
+The same current now has somewhere to go, so it flows through R2, R3 and the LED,
+which lights.
+
+That is why the LED is on only during an outage. It shares the pull-up path rather
+than having one of its own.
+
+### Why it is built this way
+
+Four requirements come from the firmware.
+
+The circuit pulls pin 4 to ground while mains power is present and releases it
+when mains fails. `AC_PRESENT_LEVEL` is `LOW` in the sketch. Invert that constant
+if you build it the other way round.
+
+It fails open. A broken wire, a dead PC817 or an unplugged charger all leave the
+node pulled up, which reads as a power failure. A false alarm costs one
+unnecessary shutdown. An alarm that never fires costs the array.
 
 It takes its reference from a mains outlet, not from the UPS output. The UPS keeps
-supplying power during an outage, so a detector fed from it never sees anything
-change.
+supplying power during an outage, so a detector fed from it would never see
+anything change.
 
-It isolates the Arduino from mains voltage. Pin 4 is a 5V logic input on a board
-powered from the NAS.
+It isolates the Arduino from mains voltage. The two grounds in the diagram, GND
+USB and GND Arduino, are deliberately not joined. Only light crosses between them.
 
-Pin 4 is configured as `INPUT_PULLUP`, so an external pull-up is optional.
+### Component values
+
+R1 at 330 ohm gives the PC817 LED about 11mA, which leaves plenty of headroom on
+current transfer ratio even with an aged part.
+
+R2 and R3 at 1k each put the pin 4 node at about 3.5V when the transistor is open.
+The ATmega32U4 needs 0.6 times Vcc, so 3.0V, to read a logic high. It works, with
+roughly half a volt of margin. Raising R3 to 2.2k lifts the node to about 4.1V and
+buys more margin, at the cost of a dimmer LED. Either is fine.
+
+Pin 4 is also configured as `INPUT_PULLUP` in the sketch. That internal pull-up is
+in the tens of kilohms, so it barely affects the divider, and it means the input
+still fails safe if R2 is ever left out.
 
 Pin 5 blinks once per second as a heartbeat. Pin 10 goes high when a HID report
 fails to send, which means the host stopped listening. Both are optional.
@@ -663,10 +703,9 @@ your edit.
 
 ## Still to do
 
-Build the optocoupler circuit and replace the jumper on pin 4. Measure the real
-autonomy with a resistive load and adjust `BATT_RUNTIME_FULL_S`. Run one
-controlled outage with the NAS on the UPS and confirm that the shutdown finishes
-before the UPS starts beeping.
+Run one controlled outage with the NAS on the UPS and confirm that the shutdown
+finishes before the UPS starts beeping. Re-measure the real autonomy whenever the
+load on the UPS changes, and adjust `BATT_RUNTIME_FULL_S` to match.
 
 ## References
 
@@ -703,11 +742,12 @@ A introdução está no topo do arquivo, logo abaixo da versão em inglês.
 
 ## Cadeia do sinal
 
-1. Um detector de presença de rede mantém o pino 4 do Arduino no terra enquanto
-   há energia, e o solta quando a rede cai. Esse circuito ainda não foi
-   projetado. A seção de ligação abaixo diz o que ele precisa fazer.
-2. O pull-up interno leva o pino 4 para nível alto assim que o detector o solta,
-   então fio solto ou componente queimado também são lidos como queda de energia.
+1. Um carregador de celular de 5V numa tomada da rede alimenta o LED de um
+   optoacoplador PC817 através de um resistor de 330 ohm. Enquanto há energia, o
+   fototransistor conduz e mantém o pino 4 do Arduino no terra.
+2. Quando a rede cai, o carregador morre, o fototransistor abre, e o R2 leva o
+   pino 4 para nível alto. Fio solto ou componente queimado fazem o mesmo, então
+   falha é lida como queda de energia.
 3. O Arduino roda uma bateria simulada e reporta carga, autonomia e flags de
    status por USB HID, usando a HID Power Device Class.
 4. O QNAP roda o `usbhid-ups` do NUT 2.7.4, lê o Arduino como nobreak, e o `upsd`
@@ -731,7 +771,7 @@ dispara custa o array.
 | NUT dentro do QTS | 2.7.4, binários em `/usr/local/ups/` |
 | Microcontrolador | Arduino Pro Micro clone, ATmega32U4, 5V, 16MHz |
 | Nobreak | Siera UPS500, 500VA, line-interactive, 220V, sem porta USB |
-| Detecção de rede | Circuito ainda não projetado. Veja a seção de ligação. |
+| Detecção de rede | Optoacoplador PC817, resistores de 330 ohm e dois de 1k, um LED e um cabo USB cortado. Veja a seção de ligação. |
 
 O TS-419P II consome 26W em operação segundo a QNAP, medido com quatro discos de
 500GB. Discos maiores levam isso para algo entre 30 e 35W. Esse número importa
@@ -808,6 +848,7 @@ As duas correções ficam do lado do Arduino. Nada no firmware do QNAP é altera
 | `UPS.ino` | O sketch. Bateria simulada, detecção de rede, relatórios HID. |
 | `boards.local.txt` | Definição da board "UPS NUT". Instalar no core AVR do Arduino. |
 | `gravar.bat` | Grava a placa chamando o avrdude direto, tentando por 30 segundos. |
+| `circuit-diagram.png` | Esquema do circuito de detecção de rede. |
 | `projeto-nobreak-qnap-handoff.md` | Diário de bordo. Cada medição e cada beco sem saída. |
 
 ## Reprodução
@@ -1025,29 +1066,68 @@ variável que um MGE de verdade teria.
 
 ## Ligação
 
-Ainda não projetada. O setup atual usa um jumper entre o pino 4 e o GND no lugar
-de um circuito de verdade.
+![Circuito de detecção de rede](circuit-diagram.png)
 
-O que for para cá precisa cumprir quatro requisitos, porque o firmware depende
-deles.
+### Lista de materiais
 
-Puxar o pino 4 para o terra enquanto há rede, e soltá-lo quando a rede cai. O
-`AC_PRESENT_LEVEL` no sketch é `LOW`. Inverta essa constante se o seu circuito
-funcionar ao contrário.
+| Qtd | Peça | Onde |
+|---|---|---|
+| 1 | Optoacoplador PC817 | Entre os dois lados. É ele que mantém o isolamento. |
+| 1 | Resistor de 330 ohm | R1, em série com o LED do PC817, no lado USB |
+| 2 | Resistores de 1k ohm | R2 puxa o pino 4 para cima, R3 limita o LED indicador |
+| 1 | LED | Acende só durante a queda de energia |
+| 1 | Cabo USB | Corte uma das pontas e use os fios de 5V e GND |
 
-Falhar em aberto. Fio solto, componente queimado e alimentação desplugada têm
-todos que ser lidos como queda de energia. Um alarme falso custa um desligamento
-desnecessário. Um alarme que nunca dispara custa o array.
+O cabo USB cortado vai num carregador de celular qualquer, numa **tomada da
+rede**. Nunca no nobreak. O projeto inteiro depende de esse carregador morrer
+quando a energia morrer.
 
-Tirar a referência de uma tomada da rede, não da saída do nobreak. O nobreak
+### Como funciona
+
+Enquanto há rede, o R1 manda uns 11mA pelo LED do PC817, o fototransistor satura,
+e puxa o nó do pino 4 para uns 0,2V. O Arduino lê LOW, que o sketch interpreta
+como rede presente, e o LED indicador fica apagado porque 0,2V está abaixo da
+tensão direta dele.
+
+Quando a rede cai, o carregador morre, o fototransistor abre, e o nó é puxado para
+cima pelo R2. O Arduino lê HIGH e o sketch começa a contagem regressiva. A mesma
+corrente agora tem para onde ir, então percorre R2, R3 e o LED, que acende.
+
+É por isso que o LED acende só na queda. Ele divide o caminho do pull-up em vez de
+ter um próprio.
+
+### Por que é assim
+
+Quatro requisitos vêm do firmware.
+
+O circuito puxa o pino 4 para o terra enquanto há rede e o solta quando a rede cai.
+O `AC_PRESENT_LEVEL` no sketch é `LOW`. Inverta essa constante se você montar ao
+contrário.
+
+Ele falha em aberto. Fio solto, PC817 queimado e carregador desplugado deixam
+todos o nó puxado para cima, o que é lido como queda de energia. Um alarme falso
+custa um desligamento desnecessário. Um alarme que nunca dispara custa o array.
+
+Ele tira a referência de uma tomada da rede, não da saída do nobreak. O nobreak
 continua fornecendo energia durante a queda, então um detector alimentado por ele
-nunca vê nada mudar.
+nunca veria nada mudar.
 
-Isolar o Arduino da tensão de rede. O pino 4 é uma entrada lógica de 5V numa placa
-alimentada pelo NAS.
+Ele isola o Arduino da tensão de rede. Os dois terras do diagrama, GND USB e GND
+Arduino, estão propositalmente separados. Só luz atravessa entre eles.
 
-O pino 4 está configurado como `INPUT_PULLUP`, então um pull-up externo é
-opcional.
+### Valores dos componentes
+
+O R1 de 330 ohm dá uns 11mA ao LED do PC817, o que deixa folga de sobra na razão
+de transferência de corrente, mesmo com uma peça envelhecida.
+
+R2 e R3 de 1k cada põem o nó do pino 4 em uns 3,5V com o transistor aberto. O
+ATmega32U4 precisa de 0,6 vezes Vcc, ou seja 3,0V, para ler nível alto. Funciona,
+com meio volt de margem. Subir o R3 para 2,2k leva o nó para uns 4,1V e compra
+mais margem, ao custo de um LED mais fraco. Qualquer um dos dois serve.
+
+O pino 4 também está como `INPUT_PULLUP` no sketch. Esse pull-up interno é da
+ordem de dezenas de kiloohms, então quase não mexe no divisor, e garante que a
+entrada continue falhando em modo seguro caso o R2 falte.
 
 O pino 5 pisca uma vez por segundo como heartbeat. O pino 10 vai para nível alto
 quando um relatório HID falha ao ser enviado, o que significa que o host parou de
@@ -1278,10 +1358,9 @@ edição.
 
 ## Ainda por fazer
 
-Montar o circuito do optoacoplador e substituir o jumper do pino 4. Medir a
-autonomia real com carga resistiva e ajustar o `BATT_RUNTIME_FULL_S`. Rodar uma
-queda controlada com o NAS no nobreak e confirmar que o desligamento termina antes
-de o nobreak começar a apitar.
+Rodar uma queda controlada com o NAS no nobreak e confirmar que o desligamento
+termina antes de o nobreak começar a apitar. Remedir a autonomia real sempre que a
+carga no nobreak mudar, e ajustar o `BATT_RUNTIME_FULL_S`.
 
 ## Referências
 
